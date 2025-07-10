@@ -1,0 +1,9 @@
+# Core OpenTelemetry API and SDK
+opentelemetry-api==1.34.1
+opentelemetry-sdk==1.34.1
+
+# OTLP HTTP exporters for traces, metrics, and logs
+opentelemetry-exporter-otlp-proto-http==1.34.1
+
+# Logging instrumentation (adds trace/span context to log records)
+opentelemetry-instrumentation-logging==0.55b1 

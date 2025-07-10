@@ -1,2 +1,3 @@
 # Ignore application log file
 app.log 
+run.log

@@ -3,6 +3,8 @@
 Traffic Generator with Periodic Errors
 A demonstration app for the Observe MCP Server that generates continuous traffic
 with periodic errors and stacktraces to showcase debugging and monitoring capabilities.
+
+# pyright: reportMissingImports=false
 """
 
 import time
@@ -12,12 +14,79 @@ import json
 import threading
 import traceback
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import sys
+from contextlib import nullcontext
+import os
 
+# Optional OpenTelemetry instrumentation
+try:
+    from opentelemetry import trace, metrics  # type: ignore
+    from opentelemetry.sdk.resources import Resource  # type: ignore
+    from opentelemetry.sdk.trace import TracerProvider  # type: ignore
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter  # type: ignore
+    from opentelemetry.sdk.metrics import MeterProvider  # type: ignore
+    from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader  # type: ignore
+    from opentelemetry.instrumentation.logging import LoggingInstrumentor  # type: ignore
+    OTEL_AVAILABLE = True
+except ImportError:
+    # OpenTelemetry not installed; continue without instrumentation
+    OTEL_AVAILABLE = False
+
+# Optional OTLP exporters (HTTP/protobuf)
+try:
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter  # type: ignore
+    from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter  # type: ignore
+    from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter  # type: ignore
+    OTLP_AVAILABLE = True
+except ImportError:
+    OTLP_AVAILABLE = False
+
+# Optional OpenTelemetry logs SDK (still evolving)
+try:
+    from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler  # type: ignore
+    from opentelemetry.sdk._logs.export import BatchLogRecordProcessor  # type: ignore
+    OTLP_LOGS_SDK_AVAILABLE = True
+except ImportError as e:
+    OTLP_LOGS_SDK_AVAILABLE = False
+
+# --------------------------------------------
+# Debug helper to log OTLP HTTP requests
+# --------------------------------------------
+if OTLP_AVAILABLE:
+    class DebugOTLPLogExporter(OTLPLogExporter):
+        """Subclass that logs HTTP request details with masked headers when root logger is DEBUG."""
+
+        def __init__(self, *args, **kwargs):  # type: ignore
+            super().__init__(*args, **kwargs)
+
+        def export(self, batch):  # type: ignore
+            if logging.getLogger().level <= logging.DEBUG:
+                # Mask authorization header if present
+                masked_headers = {}
+                for key, value in getattr(self, 'headers', {}).items():
+                    if key.lower() == "authorization":
+                        masked_headers[key] = value[:10] + "...<redacted>"
+                    else:
+                        masked_headers[key] = value
+
+                endpoint = getattr(self, "_endpoint", getattr(self, "_url", "<unknown>"))
+                logger.debug(
+                    "OTLP Log Exporter: sending %s records to %s with headers=%s",
+                    len(batch),
+                    endpoint,
+                    masked_headers,
+                )
+
+            return super().export(batch)
+
+# ------------------
 # Configure logging
+# ------------------
+LOG_LEVEL_ENV = os.getenv("LOG_LEVEL", "INFO").upper()
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL_ENV, logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
@@ -25,7 +94,87 @@ logging.basicConfig(
     ]
 )
 
+# Emit debug logs from OpenTelemetry internals when root level is DEBUG
+if logging.getLogger().level <= logging.DEBUG:
+    logging.getLogger("opentelemetry").setLevel(logging.DEBUG)
+    logging.getLogger("urllib3").setLevel(logging.DEBUG)
+
 logger = logging.getLogger('TrafficGenerator')
+
+# Debug: Show what's available
+logger.debug(f"OTEL_AVAILABLE: {OTEL_AVAILABLE}")
+logger.debug(f"OTLP_AVAILABLE: {OTLP_AVAILABLE}")
+logger.debug(f"OTLP_LOGS_SDK_AVAILABLE: {OTLP_LOGS_SDK_AVAILABLE}")
+
+# ------------------------------
+# OpenTelemetry setup (optional)
+# ------------------------------
+if OTEL_AVAILABLE:
+    resource = Resource(attributes={
+        "service.name": "traffic_generator",
+        "deployment.environment": "prod",
+    })
+
+    # Tracer provider & exporter
+    tracer_provider = TracerProvider(resource=resource)
+    trace.set_tracer_provider(tracer_provider)
+    tracer = trace.get_tracer(__name__)
+
+    # Choose exporter based on availability
+    span_exporter = OTLPSpanExporter() if OTLP_AVAILABLE else ConsoleSpanExporter()
+    tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
+
+    # Metrics exporter / reader (default interval 5s)
+    metric_exporter = OTLPMetricExporter() if OTLP_AVAILABLE else ConsoleMetricExporter()
+    metric_reader = PeriodicExportingMetricReader(
+        metric_exporter,
+        export_interval_millis=5000,
+    )
+    meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
+    metrics.set_meter_provider(meter_provider)
+    meter = metrics.get_meter(__name__)
+
+    # Metrics instruments
+    request_counter = meter.create_counter(
+        name="api_requests_total",
+        description="Total number of API requests",
+        unit="1",
+    )
+    error_counter = meter.create_counter(
+        name="api_errors_total",
+        description="Total number of API errors",
+        unit="1",
+    )
+    db_query_hist = meter.create_histogram(
+        name="db_query_execution_time_ms",
+        description="Execution time of database queries",
+        unit="ms",
+    )
+
+    # Logs exporter / provider
+    logger.debug("Checking if logs exporter should be initialized...")
+    if OTLP_AVAILABLE and OTLP_LOGS_SDK_AVAILABLE:
+        logger.debug("Initializing OTLP logs exporter...")
+        logger_provider = LoggerProvider(resource=resource)
+        # Note: otel_logs.set_logger_provider not available in experimental API
+
+        # Choose exporter class based on log level
+        log_exporter_cls = DebugOTLPLogExporter if logging.getLogger().level <= logging.DEBUG else OTLPLogExporter
+        logger_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter_cls()))
+
+        # Attach OpenTelemetry logging handler to root so standard log records are exported.
+        logging.getLogger().addHandler(LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider))
+        logger.debug("OTLP logs exporter initialized successfully!")
+    else:
+        logger.debug("OTLP logs exporter NOT initialized - missing dependencies")
+
+    # Enrich log records with OTEL context (trace/span IDs in log fmt)
+    LoggingInstrumentor().instrument(set_logging_format=True)
+else:
+    tracer = None
+    request_counter = None
+    error_counter = None
+    db_query_hist = None
 
 class DatabaseSimulator:
     """Simulates database operations with occasional failures"""
@@ -48,21 +197,29 @@ class DatabaseSimulator:
         return conn_id
     
     def query(self, conn_id: str, query: str):
-        if conn_id not in self.connection_pool:
-            raise ValueError(f"Invalid connection ID: {conn_id}")
-        
-        # Simulate slow queries
-        if "complex_join" in query:
-            time.sleep(random.uniform(2, 5))
-            
-        # Simulate query errors
-        if random.random() < self.failure_rate / 2:
-            if random.choice([True, False]):
-                raise TimeoutError(f"Query timeout after 30s: {query}")
-            else:
-                raise SyntaxError(f"Invalid SQL syntax: {query}")
-        
-        return {"rows": random.randint(0, 1000), "execution_time": random.uniform(0.1, 2.0)}
+        span_cm = tracer.start_as_current_span("db.query") if tracer else nullcontext()
+        with span_cm:
+            if conn_id not in self.connection_pool:
+                raise ValueError(f"Invalid connection ID: {conn_id}")
+
+            # Simulate slow queries
+            if "complex_join" in query:
+                time.sleep(random.uniform(2, 5))
+
+            # Simulate query errors
+            if random.random() < self.failure_rate / 2:
+                if random.choice([True, False]):
+                    raise TimeoutError(f"Query timeout after 30s: {query}")
+                else:
+                    raise SyntaxError(f"Invalid SQL syntax: {query}")
+
+            exec_time = random.uniform(0.1, 2.0)
+
+            # Record execution time metric
+            if db_query_hist:
+                db_query_hist.record(exec_time * 1000, {"query_type": "complex" if "complex_join" in query else "simple"})
+
+            return {"rows": random.randint(0, 1000), "execution_time": exec_time}
     
     def disconnect(self, conn_id: str):
         if conn_id in self.connection_pool:
@@ -82,29 +239,37 @@ class APISimulator:
         self.request_count = 0
         self.error_count = 0
         
-    def handle_request(self, endpoint: str, method: str = "GET", data: Dict = None):
+    def handle_request(self, endpoint: str, method: str = "GET", data: Optional[Dict[str, Any]] = None):
         self.request_count += 1
-        
-        try:
-            if endpoint not in self.endpoints:
-                raise ValueError(f"Unknown endpoint: {endpoint}")
-            
-            logger.info(f"API Request: {method} {endpoint}")
-            
-            # Simulate rate limiting
-            if self.request_count % 50 == 0:
-                raise RuntimeError("Rate limit exceeded: 429 Too Many Requests")
-            
-            response = self.endpoints[endpoint](method, data)
-            logger.info(f"API Response: {endpoint} - Status: {response['status']}")
-            return response
-            
-        except Exception as e:
-            self.error_count += 1
-            logger.error(f"API Error on {endpoint}: {str(e)}", exc_info=True)
-            raise
+
+        # OpenTelemetry metrics & tracing
+        if request_counter:
+            request_counter.add(1, {"endpoint": endpoint, "method": method})
+
+        span_cm = tracer.start_as_current_span(f"{method} {endpoint}") if tracer else nullcontext()
+        with span_cm:
+            try:
+                if endpoint not in self.endpoints:
+                    raise ValueError(f"Unknown endpoint: {endpoint}")
+                
+                logger.info(f"API Request: {method} {endpoint}")
+                
+                # Simulate rate limiting
+                if self.request_count % 50 == 0:
+                    raise RuntimeError("Rate limit exceeded: 429 Too Many Requests")
+                
+                response = self.endpoints[endpoint](method, data)
+                logger.info(f"API Response: {endpoint} - Status: {response['status']}")
+                return response
+                
+            except Exception as e:
+                self.error_count += 1
+                if error_counter:
+                    error_counter.add(1, {"endpoint": endpoint, "method": method})
+                logger.error(f"API Error on {endpoint}: {str(e)}", exc_info=True)
+                raise
     
-    def handle_users(self, method: str, data: Dict = None):
+    def handle_users(self, method: str, data: Optional[Dict[str, Any]] = None):
         if method == "POST" and random.random() < 0.15:
             # Simulate validation error
             raise ValueError("Invalid user data: missing required field 'email'")
@@ -115,7 +280,7 @@ class APISimulator:
             "timestamp": datetime.utcnow().isoformat()
         }
     
-    def handle_orders(self, method: str, data: Dict = None):
+    def handle_orders(self, method: str, data: Optional[Dict[str, Any]] = None):
         # Simulate intermittent service unavailability
         if random.random() < 0.05:
             raise ConnectionError("Order service temporarily unavailable")
@@ -130,7 +295,7 @@ class APISimulator:
             "timestamp": datetime.utcnow().isoformat()
         }
     
-    def handle_inventory(self, method: str, data: Dict = None):
+    def handle_inventory(self, method: str, data: Optional[Dict[str, Any]] = None):
         # Simulate memory issues with large responses
         if random.random() < 0.08:
             # This could cause memory errors in a real scenario
@@ -143,7 +308,7 @@ class APISimulator:
             "timestamp": datetime.utcnow().isoformat()
         }
     
-    def handle_analytics(self, method: str, data: Dict = None):
+    def handle_analytics(self, method: str, data: Optional[Dict[str, Any]] = None):
         # Simulate complex calculation errors
         if random.random() < 0.12:
             # Division by zero
@@ -152,7 +317,7 @@ class APISimulator:
         # Simulate type errors
         if random.random() < 0.1:
             # Attempting to perform operations on incompatible types
-            result = "string" + 123
+            result = "string" + 123  # type: ignore[arg-type]
         
         return {
             "status": 200,
