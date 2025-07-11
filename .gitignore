@@ -1,3 +1,6 @@
 # Ignore application log file
 app.log 
 run.log
+
+# Environment variables
+.env

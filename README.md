@@ -57,7 +57,7 @@ A comprehensive Python application that generates continuous traffic with period
 Install dependencies:
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -97,7 +97,7 @@ Example endpoint (Observe Cloud): `https://123456789012.collect.observeinc.com`
 Run the traffic generator:
 
 ```bash
-python traffic_generator.py
+python3 traffic-generator.py
 ```
 
 The app will:

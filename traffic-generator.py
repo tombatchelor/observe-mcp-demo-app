@@ -111,7 +111,7 @@ logger.debug(f"OTLP_LOGS_SDK_AVAILABLE: {OTLP_LOGS_SDK_AVAILABLE}")
 # ------------------------------
 if OTEL_AVAILABLE:
     resource = Resource(attributes={
-        "service.name": "traffic_generator",
+        "service.name": "traffic-generator",
         "deployment.environment": "prod",
     })
 
