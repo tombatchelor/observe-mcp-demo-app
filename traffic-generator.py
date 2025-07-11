@@ -19,6 +19,16 @@ import sys
 from contextlib import nullcontext
 import os
 
+# Optional python-dotenv for loading .env files
+try:
+    from dotenv import load_dotenv
+    # Load environment variables from .env file if it exists
+    load_dotenv()
+    DOTENV_AVAILABLE = True
+except ImportError:
+    # python-dotenv not installed; continue without .env file support
+    DOTENV_AVAILABLE = False
+
 # Optional OpenTelemetry instrumentation
 try:
     from opentelemetry import trace, metrics  # type: ignore
@@ -102,6 +112,7 @@ if logging.getLogger().level <= logging.DEBUG:
 logger = logging.getLogger('TrafficGenerator')
 
 # Debug: Show what's available
+logger.debug(f"DOTENV_AVAILABLE: {DOTENV_AVAILABLE}")
 logger.debug(f"OTEL_AVAILABLE: {OTEL_AVAILABLE}")
 logger.debug(f"OTLP_AVAILABLE: {OTLP_AVAILABLE}")
 logger.debug(f"OTLP_LOGS_SDK_AVAILABLE: {OTLP_LOGS_SDK_AVAILABLE}")

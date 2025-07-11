@@ -66,6 +66,17 @@ pip install -r requirements.txt
 
 1. Use **Add Data → Linux** in Observe to generate an ingest token.
 
+2. **Option 1: Use .env file (recommended)**
+   
+   The application automatically loads environment variables from a `.env` file if present. Create/edit `.env` with your actual values:
+   
+   ```bash
+   # Copy .env.example to .env and update with your values
+   cp .env .env.local  # or edit .env directly
+   ```
+
+3. **Option 2: Export environment variables manually**
+
 ```bash
 # Traces
 export OTEL_TRACES_EXPORTER=otlp
