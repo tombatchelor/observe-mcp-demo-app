@@ -38,6 +38,8 @@ try:
     from opentelemetry.sdk.metrics import MeterProvider  # type: ignore
     from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader  # type: ignore
     from opentelemetry.instrumentation.logging import LoggingInstrumentor  # type: ignore
+    from opentelemetry.trace import SpanKind, Status, StatusCode  # type: ignore
+    from opentelemetry.semconv.trace import SpanAttributes  # type: ignore
     OTEL_AVAILABLE = True
 except ImportError:
     # OpenTelemetry not installed; continue without instrumentation
@@ -208,9 +210,27 @@ class DatabaseSimulator:
         return conn_id
     
     def query(self, conn_id: str, query: str):
-        span_cm = tracer.start_as_current_span("db.query") if tracer else nullcontext()
-        with span_cm:
+        # Create an INTERNAL span for database operation
+        span_cm = tracer.start_as_current_span(
+            "db.query", 
+            kind=SpanKind.INTERNAL
+        ) if tracer else nullcontext()
+        
+        with span_cm as span:
+            # Add database semantic attributes
+            if span and OTEL_AVAILABLE:
+                span.set_attributes({
+                    SpanAttributes.DB_SYSTEM: "postgresql",
+                    SpanAttributes.DB_NAME: "traffic_generator",
+                    SpanAttributes.DB_STATEMENT: query[:100] + "..." if len(query) > 100 else query,
+                    SpanAttributes.DB_CONNECTION_STRING: f"postgresql://localhost:5432/traffic_generator",
+                    SpanAttributes.DB_USER: "app_user",
+                    "db.connection.id": conn_id
+                })
+            
             if conn_id not in self.connection_pool:
+                if span and OTEL_AVAILABLE:
+                    span.set_status(Status(StatusCode.ERROR, "Invalid connection ID"))
                 raise ValueError(f"Invalid connection ID: {conn_id}")
 
             # Simulate slow queries
@@ -219,18 +239,34 @@ class DatabaseSimulator:
 
             # Simulate query errors
             if random.random() < self.failure_rate / 2:
+                error_msg = ""
                 if random.choice([True, False]):
-                    raise TimeoutError(f"Query timeout after 30s: {query}")
+                    error_msg = f"Query timeout after 30s: {query}"
+                    if span and OTEL_AVAILABLE:
+                        span.set_status(Status(StatusCode.ERROR, "Query timeout"))
+                    raise TimeoutError(error_msg)
                 else:
-                    raise SyntaxError(f"Invalid SQL syntax: {query}")
+                    error_msg = f"Invalid SQL syntax: {query}"
+                    if span and OTEL_AVAILABLE:
+                        span.set_status(Status(StatusCode.ERROR, "SQL syntax error"))
+                    raise SyntaxError(error_msg)
 
             exec_time = random.uniform(0.1, 2.0)
+            rows_affected = random.randint(0, 1000)
+
+            # Add query result attributes
+            if span and OTEL_AVAILABLE:
+                span.set_attributes({
+                    "db.rows_affected": rows_affected,
+                    "db.execution_time_ms": exec_time * 1000
+                })
+                span.set_status(Status(StatusCode.OK))
 
             # Record execution time metric
             if db_query_hist:
                 db_query_hist.record(exec_time * 1000, {"query_type": "complex" if "complex_join" in query else "simple"})
 
-            return {"rows": random.randint(0, 1000), "execution_time": exec_time}
+            return {"rows": rows_affected, "execution_time": exec_time}
     
     def disconnect(self, conn_id: str):
         if conn_id in self.connection_pool:
@@ -257,19 +293,51 @@ class APISimulator:
         if request_counter:
             request_counter.add(1, {"endpoint": endpoint, "method": method})
 
-        span_cm = tracer.start_as_current_span(f"{method} {endpoint}") if tracer else nullcontext()
-        with span_cm:
+        # Create a SERVER span for service entry point
+        span_cm = tracer.start_as_current_span(
+            f"{method} {endpoint}", 
+            kind=SpanKind.SERVER
+        ) if tracer else nullcontext()
+        
+        with span_cm as span:
             try:
+                # Add semantic attributes for HTTP server spans
+                if span and OTEL_AVAILABLE:
+                    span.set_attributes({
+                        SpanAttributes.HTTP_METHOD: method,
+                        SpanAttributes.HTTP_URL: f"http://localhost:8080{endpoint}",
+                        SpanAttributes.HTTP_ROUTE: endpoint,
+                        SpanAttributes.HTTP_SCHEME: "http",
+                        SpanAttributes.HTTP_HOST: "localhost:8080",
+                        SpanAttributes.HTTP_TARGET: endpoint,
+                        SpanAttributes.HTTP_USER_AGENT: "traffic-generator/1.0"
+                    })
+                
                 if endpoint not in self.endpoints:
+                    if span and OTEL_AVAILABLE:
+                        span.set_status(Status(StatusCode.ERROR, "Unknown endpoint"))
                     raise ValueError(f"Unknown endpoint: {endpoint}")
                 
                 logger.info(f"API Request: {method} {endpoint}")
                 
                 # Simulate rate limiting
                 if self.request_count % 50 == 0:
+                    if span and OTEL_AVAILABLE:
+                        span.set_attributes({
+                            SpanAttributes.HTTP_STATUS_CODE: 429
+                        })
+                        span.set_status(Status(StatusCode.ERROR, "Rate limit exceeded"))
                     raise RuntimeError("Rate limit exceeded: 429 Too Many Requests")
                 
                 response = self.endpoints[endpoint](method, data)
+                
+                # Set successful response attributes
+                if span and OTEL_AVAILABLE:
+                    span.set_attributes({
+                        SpanAttributes.HTTP_STATUS_CODE: response['status']
+                    })
+                    span.set_status(Status(StatusCode.OK))
+                
                 logger.info(f"API Response: {endpoint} - Status: {response['status']}")
                 return response
                 
@@ -277,6 +345,15 @@ class APISimulator:
                 self.error_count += 1
                 if error_counter:
                     error_counter.add(1, {"endpoint": endpoint, "method": method})
+                
+                # Set error status on span
+                if span and OTEL_AVAILABLE:
+                    span.set_attributes({
+                        SpanAttributes.HTTP_STATUS_CODE: 500
+                    })
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    span.record_exception(e)
+                
                 logger.error(f"API Error on {endpoint}: {str(e)}", exc_info=True)
                 raise
     
@@ -382,43 +459,156 @@ class BackgroundTaskRunner:
 # Background task functions
 def cleanup_task():
     """Simulates a cleanup task that occasionally fails"""
-    logger.info("Starting cleanup task")
+    span_cm = tracer.start_as_current_span(
+        "cleanup_task", 
+        kind=SpanKind.INTERNAL
+    ) if tracer else nullcontext()
     
-    if random.random() < 0.2:
-        raise IOError("Failed to access temporary directory")
-    
-    files_cleaned = random.randint(10, 100)
-    logger.info(f"Cleanup completed: {files_cleaned} files removed")
+    with span_cm as span:
+        if span and OTEL_AVAILABLE:
+            span.set_attributes({
+                "task.name": "cleanup",
+                "task.type": "background"
+            })
+        
+        logger.info("Starting cleanup task")
+        
+        if random.random() < 0.2:
+            if span and OTEL_AVAILABLE:
+                span.set_status(Status(StatusCode.ERROR, "Failed to access temporary directory"))
+            raise IOError("Failed to access temporary directory")
+        
+        files_cleaned = random.randint(10, 100)
+        
+        if span and OTEL_AVAILABLE:
+            span.set_attributes({
+                "cleanup.files_removed": files_cleaned
+            })
+            span.set_status(Status(StatusCode.OK))
+        
+        logger.info(f"Cleanup completed: {files_cleaned} files removed")
 
 def sync_task():
     """Simulates a data sync task with network issues"""
-    logger.info("Starting data synchronization")
+    span_cm = tracer.start_as_current_span(
+        "sync_task", 
+        kind=SpanKind.INTERNAL
+    ) if tracer else nullcontext()
     
-    if random.random() < 0.15:
-        raise ConnectionError("Network timeout during sync")
-    
-    if random.random() < 0.1:
-        raise json.JSONDecodeError("Invalid response from sync server", "", 0)
-    
-    records_synced = random.randint(100, 1000)
-    logger.info(f"Sync completed: {records_synced} records synchronized")
+    with span_cm as span:
+        if span and OTEL_AVAILABLE:
+            span.set_attributes({
+                "task.name": "sync",
+                "task.type": "background"
+            })
+        
+        logger.info("Starting data synchronization")
+        
+        # Simulate an outbound HTTP call for sync
+        sync_client_span_cm = tracer.start_as_current_span(
+            "HTTP GET", 
+            kind=SpanKind.CLIENT
+        ) if tracer else nullcontext()
+        
+        with sync_client_span_cm as client_span:
+            if client_span and OTEL_AVAILABLE:
+                client_span.set_attributes({
+                    SpanAttributes.HTTP_METHOD: "GET",
+                    SpanAttributes.HTTP_URL: "https://api.syncservice.com/v1/data",
+                    SpanAttributes.HTTP_SCHEME: "https",
+                    SpanAttributes.HTTP_HOST: "api.syncservice.com",
+                    SpanAttributes.HTTP_TARGET: "/v1/data"
+                })
+            
+            if random.random() < 0.15:
+                if client_span and OTEL_AVAILABLE:
+                    client_span.set_status(Status(StatusCode.ERROR, "Network timeout"))
+                if span and OTEL_AVAILABLE:
+                    span.set_status(Status(StatusCode.ERROR, "Network timeout during sync"))
+                raise ConnectionError("Network timeout during sync")
+            
+            if random.random() < 0.1:
+                if client_span and OTEL_AVAILABLE:
+                    client_span.set_status(Status(StatusCode.ERROR, "Invalid JSON response"))
+                if span and OTEL_AVAILABLE:
+                    span.set_status(Status(StatusCode.ERROR, "Invalid response from sync server"))
+                raise json.JSONDecodeError("Invalid response from sync server", "", 0)
+            
+            if client_span and OTEL_AVAILABLE:
+                client_span.set_attributes({
+                    SpanAttributes.HTTP_STATUS_CODE: 200
+                })
+                client_span.set_status(Status(StatusCode.OK))
+        
+        records_synced = random.randint(100, 1000)
+        
+        if span and OTEL_AVAILABLE:
+            span.set_attributes({
+                "sync.records_synchronized": records_synced
+            })
+            span.set_status(Status(StatusCode.OK))
+        
+        logger.info(f"Sync completed: {records_synced} records synchronized")
 
 def cache_refresh_task():
     """Simulates cache refresh with occasional corruption"""
-    logger.info("Refreshing cache")
+    span_cm = tracer.start_as_current_span(
+        "cache_refresh_task", 
+        kind=SpanKind.INTERNAL
+    ) if tracer else nullcontext()
     
-    if random.random() < 0.1:
-        raise ValueError("Cache corruption detected: invalid checksum")
-    
-    if random.random() < 0.05:
-        # Simulate a recursive error
-        def recursive_error(depth=0):
-            if depth > 10:
-                raise RecursionError("Maximum recursion depth exceeded in cache rebuild")
-            recursive_error(depth + 1)
-        recursive_error()
-    
-    logger.info("Cache refresh completed successfully")
+    with span_cm as span:
+        if span and OTEL_AVAILABLE:
+            span.set_attributes({
+                "task.name": "cache_refresh",
+                "task.type": "background"
+            })
+        
+        logger.info("Refreshing cache")
+        
+        # Simulate an outbound call to a cache service
+        cache_client_span_cm = tracer.start_as_current_span(
+            "HTTP POST", 
+            kind=SpanKind.CLIENT
+        ) if tracer else nullcontext()
+        
+        with cache_client_span_cm as client_span:
+            if client_span and OTEL_AVAILABLE:
+                client_span.set_attributes({
+                    SpanAttributes.HTTP_METHOD: "POST",
+                    SpanAttributes.HTTP_URL: "https://cache.service.com/v1/refresh",
+                    SpanAttributes.HTTP_SCHEME: "https",
+                    SpanAttributes.HTTP_HOST: "cache.service.com",
+                    SpanAttributes.HTTP_TARGET: "/v1/refresh"
+                })
+            
+            if random.random() < 0.1:
+                if client_span and OTEL_AVAILABLE:
+                    client_span.set_status(Status(StatusCode.ERROR, "Cache corruption detected"))
+                if span and OTEL_AVAILABLE:
+                    span.set_status(Status(StatusCode.ERROR, "Cache corruption detected: invalid checksum"))
+                raise ValueError("Cache corruption detected: invalid checksum")
+            
+            if client_span and OTEL_AVAILABLE:
+                client_span.set_attributes({
+                    SpanAttributes.HTTP_STATUS_CODE: 200
+                })
+                client_span.set_status(Status(StatusCode.OK))
+        
+        if random.random() < 0.05:
+            # Simulate a recursive error
+            def recursive_error(depth=0):
+                if depth > 10:
+                    if span and OTEL_AVAILABLE:
+                        span.set_status(Status(StatusCode.ERROR, "Maximum recursion depth exceeded"))
+                    raise RecursionError("Maximum recursion depth exceeded in cache rebuild")
+                recursive_error(depth + 1)
+            recursive_error()
+        
+        if span and OTEL_AVAILABLE:
+            span.set_status(Status(StatusCode.OK))
+        
+        logger.info("Cache refresh completed successfully")
 
 def monitoring_task():
     """Simulates a monitoring task that reports system metrics"""
