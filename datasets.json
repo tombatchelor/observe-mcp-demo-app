@@ -1,0 +1,306 @@
+{
+    "data": {
+      "datasetSearch": [
+        {
+          "dataset": {
+            "id": "42555574",
+            "name": "Traffic Generator Prod"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42515606",
+            "name": "openweather/Raw Events"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42498959",
+            "name": "Host Explorer/Host Logs"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42498957",
+            "name": "Host Explorer/Prometheus Metadata"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42498956",
+            "name": "Host Explorer/Prometheus Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42498954",
+            "name": "Host Explorer/OpenTelemetry Logs"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42496014",
+            "name": "Tracing/Error Tracking Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42496010",
+            "name": "Tracing/Service Edge Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42496008",
+            "name": "Tracing/Service Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42496006",
+            "name": "Tracing/Service Explorer Spans"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42496004",
+            "name": "Tracing/Service Explorer Drilldown Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42496002",
+            "name": "Tracing/Service Inspector Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42496001",
+            "name": "Tracing/Canonical Trace"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42495999",
+            "name": "Kubernetes Explorer/Kubernetes Logs"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42495994",
+            "name": "Tracing/Span Link"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42495993",
+            "name": "Tracing/Span Event"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42495992",
+            "name": "Tracing/Span Raw"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42495990",
+            "name": "Kubernetes Explorer/Kubernetes Entity"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42495987",
+            "name": "Kubernetes Explorer/Prometheus Metadata"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42495986",
+            "name": "Kubernetes Explorer/Prometheus Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42495984",
+            "name": "Kubernetes Explorer/OpenTelemetry Logs"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493708",
+            "name": "usage/Observe Usage Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493700",
+            "name": "usage/Observe Package"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493699",
+            "name": "usage/Observe Dataset"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493698",
+            "name": "usage/Observe Account"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493697",
+            "name": "usage/Observe User"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493696",
+            "name": "usage/Observe Monitor"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493695",
+            "name": "usage/Monitor Alarms"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493692",
+            "name": "usage/Notification Count Per Hour"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493687",
+            "name": "monitor/individual 42493686"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493685",
+            "name": "monitor/individual 42493684"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493683",
+            "name": "monitor/individual 42493682"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493681",
+            "name": "usage/Raw Usage Events"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493680",
+            "name": "usage/Monitor Detections"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493679",
+            "name": "usage/Monitor Channel Action Triggered Events"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493678",
+            "name": "usage/Observe Dashboard"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493676",
+            "name": "usage/Token Usage Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493675",
+            "name": "monitor/individual 42493674"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493673",
+            "name": "usage/Observe Worksheet"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493672",
+            "name": "usage/Monitor Notifications"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493671",
+            "name": "usage/Monitor Messages"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493670",
+            "name": "usage/Observe Datastream"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493669",
+            "name": "monitor/individual 42493668"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493667",
+            "name": "usage/Audit Events"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493666",
+            "name": "usage/License Ingest Events"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493665",
+            "name": "usage/Observe Query"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493664",
+            "name": "usage/Observe Token"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493662",
+            "name": "usage/ACM Metrics"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493661",
+            "name": "usage/Monitor Stats"
+          }
+        },
+        {
+          "dataset": {
+            "id": "42493660",
+            "name": "Observe Usage reporting"
+          }
+        }
+      ]
+    }
+  }
